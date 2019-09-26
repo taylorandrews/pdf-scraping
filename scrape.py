@@ -41,8 +41,8 @@ def extract_data(fp, header, speedy=False):
     # this finds the top row on a first page:
     if speedy:
         # cheat:
-        row_search_top = 332 # 4/5 files
-        # row_search_top = 284 # diamondback
+        # row_search_top = 332 # 4/5 files
+        row_search_top = 284 # diamondback
     else:
         cell_A1 = ''
         row_search_top = 236
@@ -241,7 +241,7 @@ def transform_data(df):
 
     df_agg = pd.DataFrame(columns=group_by_columns)
 
-    df_volumes = df[df['pv_volume'] > 0] # cols grouped by volume
+    df_volumes = df[df['pv_volume'] != 0] # cols grouped by volume
 
     for (idx, row) in df_volumes.iterrows():
         row_agg = [row['entity_ownership'] # entity_ownership
@@ -270,19 +270,28 @@ def transform_data(df):
 
     volume_table_indexes = pd.Series()
 
-    i = df_data_long.index[0]
-    j = 0
     for data_idx in df_data_long.index:
-        if i == data_idx:
-            volume_table_indexes = volume_table_indexes.append(pd.Series(data=[j], index=[data_idx]))
-        else:
-            volume_table_indexes = volume_table_indexes.append(pd.Series(data=[i], index=[data_idx]))
-            j = i
-            i = data_idx
-        i += 1
+        for i in list(range(data_idx)):
+            if i not in df_data_long.index:
+                idx = i
+        volume_table_indexes = volume_table_indexes.append(pd.Series(data=[i], index=[data_idx]))
+
+
+    # i = df_data_long.index[0]
+    # j = 0
+    # for data_idx in df_data_long.index:
+    #     if i == data_idx:
+    #         volume_table_indexes = volume_table_indexes.append(pd.Series(data=[j], index=[data_idx]))
+    #     else:
+    #         volume_table_indexes = volume_table_indexes.append(pd.Series(data=[i], index=[data_idx]))
+    #         j = i
+    #         i = data_idx
+    #     i += 1
 
     value_col_df = pd.DataFrame(data={'volume_table_index': volume_table_indexes})
     df_values = df_data_long.join(value_col_df)
+
+    # print(df_values)
 
     dfs_to_add = []
     for col in cols_to_add:
@@ -319,6 +328,7 @@ if __name__ == '__main__':
             , 'DELRIO Extraction.pdf'
             , 'LEP3 Bison.pdf'
             , 'LEP3 Diamondback.pdf']
+    # fps = ['LEP3 Diamondback.pdf']
 
     data = '../samples/'
     output = '../results/'
@@ -327,13 +337,13 @@ if __name__ == '__main__':
 
     for fp in fps:
         print('processing {} ...'.format(fp))
-        df = process_pdf(data + fp, speedy)
+        df = process_pdf(data + fp, speedy=False)
         df.to_csv(path_or_buf=output + fp[:-4] + '.csv', index=False)
 
 
 
 
         # TODO: put a try catch aronud this whole thing?
-        # TODO: overlapping names? will overwrite
-        # TODO: nulls to 0's
-        # TODO: check_extraction function
+        # TODO: overlapping file names? will overwrite
+        # TODO: nulls to 0's - entire df
+        # TODO: check_extraction function improvements?
