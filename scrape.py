@@ -270,23 +270,22 @@ def transform_data(df):
 
     volume_table_indexes = pd.Series()
 
-    for data_idx in df_data_long.index:
-        for i in list(range(data_idx)):
-            if i not in df_data_long.index:
-                idx = i
-        volume_table_indexes = volume_table_indexes.append(pd.Series(data=[i], index=[data_idx]))
-
-
-    # i = df_data_long.index[0]
-    # j = 0
     # for data_idx in df_data_long.index:
-    #     if i == data_idx:
-    #         volume_table_indexes = volume_table_indexes.append(pd.Series(data=[j], index=[data_idx]))
-    #     else:
-    #         volume_table_indexes = volume_table_indexes.append(pd.Series(data=[i], index=[data_idx]))
-    #         j = i
-    #         i = data_idx
-    #     i += 1
+    #     for i in list(range(data_idx)):
+    #         if i not in df_data_long.index:
+    #             idx = i
+    #     volume_table_indexes = volume_table_indexes.append(pd.Series(data=[i], index=[data_idx]))
+
+    i = df_data_long.index[0]
+    j = 0
+    for data_idx in df_data_long.index:
+        if i == data_idx:
+            volume_table_indexes = volume_table_indexes.append(pd.Series(data=[j], index=[data_idx]))
+        else:
+            volume_table_indexes = volume_table_indexes.append(pd.Series(data=[i], index=[data_idx]))
+            j = i
+            i = data_idx
+        i += 1
 
     value_col_df = pd.DataFrame(data={'volume_table_index': volume_table_indexes})
     df_values = df_data_long.join(value_col_df)
@@ -299,7 +298,9 @@ def transform_data(df):
         volume_table_index_series = df_values[df_values['na_type'] == col]['volume_table_index']
         df_to_add = pd.DataFrame(data={col.lower().replace(' ', '_'): os_value_series}).set_index(volume_table_index_series)
         dfs_to_add.append(df_to_add)
-    df_agg = df_agg.join(dfs_to_add, how='left')
+    # print(f'{len(dfs_to_add)}: {dfs_to_add}')
+    for df in dfs_to_add:
+        df_agg = df_agg.join(df, how='left')
     df_done = df_agg.fillna(0)
 
     return df_done
@@ -326,9 +327,10 @@ if __name__ == '__main__':
     fps = ['DELRIO Bonanza Creek.pdf'
             , 'LEP3 Chesapeake.pdf'
             , 'DELRIO Extraction.pdf'
-            , 'LEP3 Bison.pdf'
-            , 'LEP3 Diamondback.pdf']
-    # fps = ['LEP3 Diamondback.pdf']
+            , 'LEP3 Bison.pdf']
+    #         , 'LEP3 Diamondback.pdf']
+    # fps = ['DELRIO Bonanza Creek.pdf']
+    # fps = ['LEP3 Chesapeake.pdf']
 
     data = '../samples/'
     output = '../results/'
@@ -341,9 +343,8 @@ if __name__ == '__main__':
         df.to_csv(path_or_buf=output + fp[:-4] + '.csv', index=False)
 
 
-
-
         # TODO: put a try catch aronud this whole thing?
         # TODO: overlapping file names? will overwrite
         # TODO: nulls to 0's - entire df
         # TODO: check_extraction function improvements?
+        # TODO: multiple pdfs into 1 .csv
