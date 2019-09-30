@@ -116,8 +116,6 @@ def extract_data(fp, header, speedy=False):
     return df
 
 def process_energy_type_row(row):
-    # TODO: process more using a set of energy_type names for more consistent output
-    # ex. 'OIL' vs 'O - OIL'
     row.dropna(inplace=True)
     energy_type = row.iloc[0]
     if 'DOI:' not in energy_type:
@@ -194,6 +192,15 @@ def process_row(row, header, property_info, energy_type, idx_month):
     pv_price = left_of_interest[2]
     pv_value = left_of_interest[3]
 
+    # transform na_type to unified set
+    if 'GAS' in energy_type and 'NATURAL' not in energy_type:
+        energy_type = "gas"
+    elif 'OIL' in energy_type:
+        energy_type = 'oil'
+    elif energy_type == 'NATURAL GAS LIQUIDS':
+        energy_type = 'ngl'
+
+
     row_data_ready = [header[0] # entity_ownership
                     , property_info[0] # property_name
                     , property_info[1] # state
@@ -237,6 +244,7 @@ def transform_data(df):
                 , 'pv_volume' # pv_volume
                 , 'pv_price' # pv_price
                 , 'os_value' # os_value
+                , 'os_volume' # os_volume
                 ]
 
     df_agg = pd.DataFrame(columns=group_by_columns)
@@ -256,6 +264,7 @@ def transform_data(df):
                  , row['pv_volume'] # pv_volume
                  , row['pv_price'] # pv_price
                  , row['os_value'] # os_value
+                 , row['os_volume'] # os_volume
                  ]
 
         row_pandas = pd.Series(data=row_agg, index=group_by_columns)
@@ -270,27 +279,14 @@ def transform_data(df):
 
     volume_table_indexes = pd.Series()
 
-    # for data_idx in df_data_long.index:
-    #     for i in list(range(data_idx)):
-    #         if i not in df_data_long.index:
-    #             idx = i
-    #     volume_table_indexes = volume_table_indexes.append(pd.Series(data=[i], index=[data_idx]))
-
-    i = df_data_long.index[0]
-    j = 0
     for data_idx in df_data_long.index:
-        if i == data_idx:
-            volume_table_indexes = volume_table_indexes.append(pd.Series(data=[j], index=[data_idx]))
-        else:
-            volume_table_indexes = volume_table_indexes.append(pd.Series(data=[i], index=[data_idx]))
-            j = i
-            i = data_idx
-        i += 1
+        for i in list(range(data_idx)):
+            if i not in df_data_long.index:
+                idx = i
+        volume_table_indexes = volume_table_indexes.append(pd.Series(data=[idx], index=[data_idx]))
 
     value_col_df = pd.DataFrame(data={'volume_table_index': volume_table_indexes})
     df_values = df_data_long.join(value_col_df)
-
-    # print(df_values)
 
     dfs_to_add = []
     for col in cols_to_add:
@@ -298,10 +294,74 @@ def transform_data(df):
         volume_table_index_series = df_values[df_values['na_type'] == col]['volume_table_index']
         df_to_add = pd.DataFrame(data={col.lower().replace(' ', '_'): os_value_series}).set_index(volume_table_index_series)
         dfs_to_add.append(df_to_add)
-    # print(f'{len(dfs_to_add)}: {dfs_to_add}')
+
     for df in dfs_to_add:
         df_agg = df_agg.join(df, how='left')
     df_done = df_agg.fillna(0)
+
+    return df_done
+
+def format_data(df):
+    df_agg = pd.DataFrame()
+    volume_loc = list(df.columns).index('os_volume')
+    data_cols = df.columns[volume_loc+1:]
+    df_data = df[data_cols]
+
+    static_cols = []
+    for col in df.columns:
+        if 'ad_valorem' in col:
+            static_cols.append(col)
+        if 'severance_tax' in col:
+            static_cols.append(col)
+
+    for col in static_cols:
+        if col not in df_data.columns:
+            df_agg[col] = 0
+        else:
+            df_agg[col] = df_data.pop(col)
+
+    tax_cols = [col for col in df_data.columns if 'tax' in col]
+    df_agg['other_tax'] = df_data[tax_cols].sum(axis=1)
+    df_data = df_data.drop(tax_cols, axis=1)
+
+    df_agg['other'] = df_data.sum(axis=1)
+
+    df_joined = df[df.columns[:volume_loc+1]].join(df_agg)
+    df_all = df_joined.fillna(0)
+
+    group_by_cols = ['entity_ownership',
+        'state',
+        'county',
+        'operator',
+        'well_name',
+        'check_month',
+        'production_date',
+        'os_distribution_interest']
+
+    df_summed = df_all.groupby(group_by_cols + ['energy_type']).sum().reset_index()
+
+    df_summed['pv_price'] = df_summed['os_value'] / df_summed['os_volume']
+    df_summed = df_summed.replace([np.inf, -np.inf], 0)
+
+    final_cols = ['pv_volume', 'pv_price', 'os_value', 'os_volume']
+    run = 1
+    for energy_type in df_summed['energy_type'].unique():
+        df_add = df_summed[df_summed['energy_type'] == energy_type]
+        if run == 1:
+            df = df_add
+            first_energy_type = energy_type
+            run += 1
+        elif run == 2:
+            df = df.merge(right=df_add, on=group_by_cols, suffixes=(f'_{first_energy_type.lower()}', f'_{energy_type.lower()}'))
+            run += 1
+        else:
+            rename_cols = {col: f'{col}_{energy_type}' for col in final_cols + static_cols + ['other_tax', 'other']}
+            df_add = df_add.rename(columns=rename_cols)
+            df = df.merge(right=df_add, on=group_by_cols)
+
+    keep_cols = [col for col in df.columns if 'energy_type' not in col]
+    df_keep_only = df[keep_cols]
+    df_done = df_keep_only.fillna(0)
 
     return df_done
 
@@ -321,30 +381,28 @@ def process_pdf(fp, speedy):
     df = extract_data(fp, header, speedy)
     df = check_extraction(df)
     df = transform_data(df)
+    df = format_data(df)
     return df
 
 if __name__ == '__main__':
     fps = ['DELRIO Bonanza Creek.pdf'
             , 'LEP3 Chesapeake.pdf'
             , 'DELRIO Extraction.pdf'
-            , 'LEP3 Bison.pdf']
-    #         , 'LEP3 Diamondback.pdf']
-    # fps = ['DELRIO Bonanza Creek.pdf']
-    # fps = ['LEP3 Chesapeake.pdf']
+            , 'LEP3 Bison.pdf'
+            , 'LEP3 Diamondback.pdf']
 
     data = '../samples/'
     output = '../results/'
 
-    # speedy = True
+    speedy = False
 
+    dfs = []
     for fp in fps:
         print('processing {} ...'.format(fp))
-        df = process_pdf(data + fp, speedy=False)
-        df.to_csv(path_or_buf=output + fp[:-4] + '.csv', index=False)
+        df = process_pdf(data + fp, speedy
+        dfs.append(df)
+    df = dfs[0].append(dfs[1:], sort=False)
+    df = df.fillna(0)
+    df.to_csv(path_or_buf=output + 'all_pdfs.csv', index=False)
 
-
-        # TODO: put a try catch aronud this whole thing?
-        # TODO: overlapping file names? will overwrite
-        # TODO: nulls to 0's - entire df
-        # TODO: check_extraction function improvements?
-        # TODO: multiple pdfs into 1 .csv
+    # TODO: automated filename grabber
