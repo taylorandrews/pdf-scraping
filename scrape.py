@@ -102,11 +102,10 @@ def extract_data(fp, header, speedy=False):
     for page in all_data:
         for (idx, row_raw) in page.iterrows():
             row_raw_no_na = row_raw.dropna()
-            if 'Property:' in str(row_raw[0]):
+            if 'Property:' in str(row_raw[0]) and 'FEDERAL' not in str(row_raw[0]):
                 property_info = process_property_row(row_raw)
             elif len(row_raw_no_na) == 1 and row_raw_no_na.index == [0] and 'DOI:' not in row_raw_no_na[0]:
                 energy_type = process_energy_type_row(row_raw)
-
             if len(row_raw[row_raw.str.contains('|'.join(months_search))==True]) > 0: # row contains mmm
                 idx_month = int(row_raw[row_raw.str.contains('|'.join(months_search))==True].index[0])
                 row_processed = process_row(row_raw, header, property_info, energy_type, idx_month)
@@ -118,7 +117,7 @@ def extract_data(fp, header, speedy=False):
 def process_energy_type_row(row):
     row.dropna(inplace=True)
     energy_type = row.iloc[0]
-    if 'DOI:' not in energy_type:
+    if 'DOI:' not in energy_type and 'Producer' not in energy_type:
         return row.iloc[0]
 
 def process_property_row(row):
@@ -135,7 +134,7 @@ def process_property_row(row):
     if suffix_loc > 0:
         property_info = property_info[:suffix_loc]
 
-    state = next(word for word in property_info.split(' ')[::-1] if len(word) == 2)
+    state = next(word for word in property_info.split(' ')[::-1] if len(word) == 2) # state is right-most 2 letter word
     idx_state = property_info.rindex(state)
     well_name = property_info[:idx_state - 1]
     county = property_info[idx_state + 3:]
@@ -152,8 +151,8 @@ def process_row(row, header, property_info, energy_type, idx_month):
     row = [j for i in row for j in str(i).split('  ')] # takes '  ' out of all items in <row>
 
     # get na_type, production_date
-    if len(row[idx_month]) == 6: # if 'mmm yy' is isolated in it's own column
-        if len(row[0]) > 5:
+    if len(row[idx_month]) == 6: # if 'mmm yy' is isolated in it's own column)
+        if len(row[0]) > 0:
             na_type = row[0]
             production_date = row[idx_month]
             row = row[idx_month+1:]
@@ -174,7 +173,10 @@ def process_row(row, header, property_info, energy_type, idx_month):
         if str(elem) != 'nan' and elem[1:-8] == '.': # finds strings of format 'x.xxxxxxxx'
             interest.append(idx)
     os_owner_interest = row.pop(interest[0])
-    os_distribution_interest = row.pop(interest[1]-1)
+    if len(row) == 1:
+        os_distribution_interest = row.pop(interest[1]-1)
+    else:
+        os_distribution_interest = '0'
 
     # get os_volume, os_value
     right_of_intesest = [x for x in row[interest[0]:] if x != 'nan']
@@ -357,7 +359,7 @@ def format_data(df):
         else:
             rename_cols = {col: f'{col}_{energy_type}' for col in final_cols + static_cols + ['other_tax', 'other']}
             df_add = df_add.rename(columns=rename_cols)
-            df = df.merge(right=df_add, on=group_by_cols)
+            df = df.merge(how='outer', right=df_add, on=group_by_cols)
 
     keep_cols = [col for col in df.columns if 'energy_type' not in col]
     df_keep_only = df[keep_cols]
@@ -391,7 +393,12 @@ if __name__ == '__main__':
             , 'LEP3 Bison.pdf'
             , 'LEP3 Diamondback.pdf']
 
-    data = '../samples/'
+    fps = ['LEP3 Anadarko.pdf',
+        'DELRIO Hess.pdf',
+        'LEH Noble.pdf']
+    # fps = ['DELRIO Bonanza Creek.pdf']
+    # data = '../samples/'
+    data = '../second-round-info/'
     output = '../results/'
 
     speedy = False
@@ -399,9 +406,12 @@ if __name__ == '__main__':
     dfs = []
     for fp in fps:
         print('processing {} ...'.format(fp))
-        df = process_pdf(data + fp, speedy
+        df = process_pdf(data + fp, speedy)
         dfs.append(df)
-    df = dfs[0].append(dfs[1:], sort=False)
+    if len(dfs) > 1:
+        df = dfs[0].append(dfs[1:], sort=False)
+    else:
+        df = dfs[0]
     df = df.fillna(0)
     df.to_csv(path_or_buf=output + 'all_pdfs.csv', index=False)
 
